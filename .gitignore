@@ -2,3 +2,7 @@ out/
 node_modules/
 *.log
 .DS_Store
+
+# The harness mounts the sealed snapshot at /input at run time; this copy is
+# only for running the program by hand, so it stays out of the history.
+input/
