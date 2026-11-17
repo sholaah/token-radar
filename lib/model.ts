@@ -298,7 +298,7 @@ export function chainFactor(chains: string[], model: ModelConstants): { factor: 
 }
 
 /** The factors and the implied value one protocol gets under `model`. */
-export function impliedValue(p: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; detail: RowModel } {
+export function impliedValue(p: SnapshotProtocol, asOf: string, model: ModelConstants, floorUsd: number): { implied: number; detail: RowModel } {
   const age = ageDays(asOf, p.listed_at);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, finite(p.change_7d, 0)));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
@@ -308,8 +308,17 @@ export function impliedValue(p: SnapshotProtocol, asOf: string, model: ModelCons
   const catMult = known ? model.category_multiple[p.category as string]! : model.default_multiple;
   const { factor, basis } = chainFactor(p.chains, model);
   const implied = Math.max(1, Math.round(p.tvl_usd * catMult * growthMult * maturityMult * factor));
+  /* Confidence is how much of the number the record actually supports, not how
+   * good the protocol is: a known listing date, a reported seven-day change, a
+   * category with live comparables, TVL at or above the watchlist floor, more
+   * than a year tokenless, and more than two chains each add their share. */
   const confidence = round4(
-    (age !== null ? 0.3 : 0) + (p.change_7d !== null ? 0.2 : 0) + (known ? 0.2 : 0) + (p.tvl_usd >= 20_000_000 ? 0.15 : 0) + (age !== null && age >= 180 ? 0.15 : 0),
+    (age !== null ? 0.15 : 0) +
+      (p.change_7d !== null ? 0.15 : 0) +
+      (known ? 0.2 : 0) +
+      (p.tvl_usd >= floorUsd ? 0.25 : 0) +
+      (age !== null && age >= 365 ? 0.15 : 0) +
+      (p.chains.length >= 3 ? 0.1 : 0),
   );
   return {
     implied,
@@ -398,7 +407,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   const wl = new Set(snapshot.watchlist);
   // The watchlist is the floor: its slugs are kept even if the exclusion rule would drop them.
   const chosen = snapshot.protocols.filter((p) => wl.has(p.slug) || isRankable(p));
-  const scored = chosen.map((p) => ({ p, ...impliedValue(p, snapshot.as_of, model) }));
+  const scored = chosen.map((p) => ({ p, ...impliedValue(p, snapshot.as_of, model, snapshot.floor_usd) }));
   scored.sort((a, b) => b.implied - a.implied || bySlugOrder(a.p.slug, b.p.slug));
   return scored.map((s, i) => ({
     rank: i + 1,
